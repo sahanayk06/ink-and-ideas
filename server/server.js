@@ -1,6 +1,8 @@
+
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
+const path = require("path");
 require("dotenv").config();
 
 const authRoutes = require("./routes/auth");
@@ -15,8 +17,14 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
-app.use("/uploads", express.static("uploads"));
 
+// Serve uploaded profile pictures from the server/uploads folder.
+app.use(
+  "/uploads",
+  express.static(path.join(__dirname, "uploads"))
+);
+
+// API routes
 app.use("/api/auth", authRoutes);
 app.use("/api/posts", postRoutes);
 app.use("/api/comments", commentRoutes);
@@ -25,6 +33,7 @@ app.use("/api/profile-picture", profilePictureRoutes);
 app.use("/api/bookmarks", bookmarkRoutes);
 app.use("/api/notifications", notificationRoutes);
 
+// Root route
 app.get("/", (req, res) => {
   res.json({
     message: "Blog API is running successfully!",
@@ -35,19 +44,19 @@ app.get("/", (req, res) => {
   });
 });
 
-async function startServer() {
-  try {
-    await mongoose.connect(process.env.MONGO_URI);
-    console.log("MongoDB connected successfully!");
+// Connect MongoDB
+mongoose
+  .connect(process.env.MONGO_URI)
+  .then(() => {
+    console.log("MongoDB connected successfully");
+  })
+  .catch((error) => {
+    console.error("MongoDB connection error:", error);
+  });
 
-    const PORT = process.env.PORT || 5001;
+// Start server
+const PORT = process.env.PORT || 5001;
 
-    app.listen(PORT, () => {
-      console.log(`Server running at http://localhost:${PORT}`);
-    });
-  } catch (error) {
-    console.error("MongoDB connection failed:", error.message);
-  }
-}
-
-startServer();
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});

@@ -81,6 +81,7 @@ router.post("/register", async (req, res) => {
         username: user.username,
         email: user.email,
         bio: user.bio,
+        profilePicture: user.profilePicture || "",
       },
     });
   } catch (error) {
@@ -149,6 +150,7 @@ router.post("/login", async (req, res) => {
         username: user.username,
         email: user.email,
         bio: user.bio,
+        profilePicture: user.profilePicture || "",
       },
     });
   } catch (error) {
@@ -194,6 +196,7 @@ router.get("/profile", authenticateToken, async (req, res) => {
         username: user.username,
         email: user.email,
         bio: user.bio,
+        profilePicture: user.profilePicture || "",
         joinedAt: user.createdAt,
       },
       stats: {
@@ -264,6 +267,7 @@ router.put("/profile", authenticateToken, async (req, res) => {
         username: user.username,
         email: user.email,
         bio: user.bio,
+        profilePicture: user.profilePicture || "",
         joinedAt: user.createdAt,
       },
     });

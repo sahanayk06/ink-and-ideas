@@ -2,24 +2,47 @@
 import { useEffect, useRef, useState } from "react";
 
 const API = "http://localhost:5001/api";
+const SERVER = "http://localhost:5001";
+
+const defaultStats = {
+  totalPosts: 0,
+  likesReceived: 0,
+  totalCategories: 0,
+};
 
 function ProfileSection({ token, user, onUserUpdated }) {
   const [profile, setProfile] = useState(null);
-  const [stats, setStats] = useState({
-    totalPosts: 0,
-    likesReceived: 0,
-    totalCategories: 0,
-  });
+  const [stats, setStats] = useState(defaultStats);
   const [posts, setPosts] = useState([]);
+
   const [editing, setEditing] = useState(false);
   const [username, setUsername] = useState(user?.username || "");
   const [bio, setBio] = useState("");
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [imageError, setImageError] = useState(false);
+
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+
   const fileInputRef = useRef(null);
+
+  // Story editing state
+  const [editingPostId, setEditingPostId] = useState(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editContent, setEditContent] = useState("");
+  const [editCategory, setEditCategory] = useState("General");
+  const [storySaving, setStorySaving] = useState(false);
+
+  function updateMainUser(updatedUser) {
+    localStorage.setItem("blogUser", JSON.stringify(updatedUser));
+
+    if (onUserUpdated) {
+      onUserUpdated(updatedUser);
+    }
+  }
 
   async function loadProfile() {
     try {
@@ -27,7 +50,9 @@ function ProfileSection({ token, user, onUserUpdated }) {
       setError("");
 
       const response = await fetch(`${API}/auth/profile`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
       });
 
       const data = await response.json();
@@ -37,10 +62,19 @@ function ProfileSection({ token, user, onUserUpdated }) {
       }
 
       setProfile(data.user);
-      setStats(data.stats);
+      setStats(data.stats || defaultStats);
       setPosts(data.posts || []);
-      setUsername(data.user.username);
+
+      setUsername(data.user.username || "");
       setBio(data.user.bio || "");
+
+      // Keep the main application user data updated.
+      updateMainUser({
+        ...user,
+        ...data.user,
+        profilePicture:
+          data.user.profilePicture || user?.profilePicture || "",
+      });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -49,11 +83,22 @@ function ProfileSection({ token, user, onUserUpdated }) {
   }
 
   useEffect(() => {
-    loadProfile();
+    if (token) {
+      loadProfile();
+    }
   }, [token]);
 
+  // Build the full image URL.
+  const profilePictureUrl = profile?.profilePicture
+    ? profile.profilePicture.startsWith("http")
+      ? profile.profilePicture
+      : `${SERVER}${profile.profilePicture}`
+    : "";
+
+  // Upload profile picture.
   async function uploadProfilePicture(event) {
     const file = event.target.files?.[0];
+
     if (!file) return;
 
     if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
@@ -78,7 +123,9 @@ function ProfileSection({ token, user, onUserUpdated }) {
 
       const response = await fetch(`${API}/profile-picture`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
         body: formData,
       });
 
@@ -88,10 +135,25 @@ function ProfileSection({ token, user, onUserUpdated }) {
         throw new Error(data.message || "Picture upload failed.");
       }
 
-      setProfile((previous) => ({
-        ...previous,
+      if (!data.profilePicture) {
+        throw new Error("Upload succeeded, but no image path was returned.");
+      }
+
+      const updatedProfile = {
+        ...profile,
         profilePicture: data.profilePicture,
-      }));
+      };
+
+      setProfile(updatedProfile);
+      setImageError(false);
+
+      const updatedUser = {
+        ...user,
+        ...updatedProfile,
+        profilePicture: data.profilePicture,
+      };
+
+      updateMainUser(updatedUser);
 
       setMessage("Profile picture updated successfully!");
     } catch (err) {
@@ -102,6 +164,7 @@ function ProfileSection({ token, user, onUserUpdated }) {
     }
   }
 
+  // Save username and bio.
   async function saveProfile(event) {
     event.preventDefault();
 
@@ -125,21 +188,19 @@ function ProfileSection({ token, user, onUserUpdated }) {
         throw new Error(data.message || "Unable to update profile.");
       }
 
-      setProfile((previous) => ({
-        ...previous,
+      const updatedProfile = {
+        ...profile,
         ...data.user,
-      }));
-
-      const updatedUser = {
-        ...data.user,
-        profilePicture: profile?.profilePicture || "",
+        profilePicture:
+          data.user.profilePicture || profile?.profilePicture || "",
       };
 
-      localStorage.setItem("blogUser", JSON.stringify(updatedUser));
+      setProfile(updatedProfile);
 
-      if (onUserUpdated) {
-        onUserUpdated(updatedUser);
-      }
+      updateMainUser({
+        ...user,
+        ...updatedProfile,
+      });
 
       setEditing(false);
       setMessage("Your profile has been updated!");
@@ -150,103 +211,100 @@ function ProfileSection({ token, user, onUserUpdated }) {
     }
   }
 
-const [editingPostId, setEditingPostId] = useState(null);
-const [editTitle, setEditTitle] = useState("");
-const [editContent, setEditContent] = useState("");
-const [editCategory, setEditCategory] = useState("General");
-const [storySaving, setStorySaving] = useState(false);
-
-function startEditingStory(post) {
-  setEditingPostId(post._id);
-  setEditTitle(post.title);
-  setEditContent(post.content);
-  setEditCategory(post.category || "General");
-  setMessage("");
-  setError("");
-}
-
-async function saveStory(event) {
-  event.preventDefault();
-
-  try {
-    setStorySaving(true);
-    setError("");
+  // Start editing a story.
+  function startEditingStory(post) {
+    setEditingPostId(post._id);
+    setEditTitle(post.title);
+    setEditContent(post.content);
+    setEditCategory(post.category || "General");
     setMessage("");
+    setError("");
+  }
 
-    const response = await fetch(`${API}/posts/${editingPostId}`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        title: editTitle,
-        content: editContent,
-        category: editCategory,
-      }),
-    });
+  // Save edited story.
+  async function saveStory(event) {
+    event.preventDefault();
 
-    const data = await response.json();
+    try {
+      setStorySaving(true);
+      setError("");
+      setMessage("");
 
-    if (!response.ok) {
-      throw new Error(data.message || "Unable to update story.");
+      const response = await fetch(`${API}/posts/${editingPostId}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          title: editTitle,
+          content: editContent,
+          category: editCategory,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Unable to update story.");
+      }
+
+      setPosts((previousPosts) =>
+        previousPosts.map((post) =>
+          post._id === editingPostId
+            ? { ...post, ...data.post }
+            : post
+        )
+      );
+
+      setEditingPostId(null);
+      setMessage("Your story has been updated!");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setStorySaving(false);
     }
+  }
 
-    setPosts((previousPosts) =>
-      previousPosts.map((post) =>
-        post._id === editingPostId
-          ? { ...post, ...data.post }
-          : post
-      )
+  // Delete a story.
+  async function deleteStory(postId) {
+    const confirmed = window.confirm(
+      "Are you sure you want to delete this story?"
     );
 
-    setEditingPostId(null);
-    setMessage("Your story has been updated!");
-  } catch (err) {
-    setError(err.message);
-  } finally {
-    setStorySaving(false);
-  }
-}
+    if (!confirmed) return;
 
-async function deleteStory(postId) {
-  const confirmed = window.confirm(
-    "Are you sure you want to delete this story?"
-  );
+    try {
+      setError("");
+      setMessage("");
 
-  if (!confirmed) return;
+      const response = await fetch(`${API}/posts/${postId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
 
-  try {
-    setError("");
-    setMessage("");
+      const data = await response.json();
 
-    const response = await fetch(`${API}/posts/${postId}`, {
-      method: "DELETE",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+      if (!response.ok) {
+        throw new Error(data.message || "Unable to delete story.");
+      }
 
-    const data = await response.json();
+      setPosts((previousPosts) =>
+        previousPosts.filter((post) => post._id !== postId)
+      );
 
-    if (!response.ok) {
-      throw new Error(data.message || "Unable to delete story.");
+      setStats((previousStats) => ({
+        ...previousStats,
+        totalPosts: Math.max(0, previousStats.totalPosts - 1),
+      }));
+
+      setMessage("Your story has been deleted!");
+    } catch (err) {
+      setError(err.message);
     }
-
-    setPosts((previousPosts) =>
-      previousPosts.filter((post) => post._id !== postId)
-    );
-
-    setStats((previousStats) => ({
-      ...previousStats,
-      totalPosts: Math.max(0, previousStats.totalPosts - 1),
-    }));
-
-    setMessage("Your story has been deleted!");
-  } catch (err) {
-    setError(err.message);
   }
-}
 
   if (loading) {
     return (
@@ -269,6 +327,7 @@ async function deleteStory(postId) {
 
   return (
     <section className="profile-page">
+      {/* Instagram-style profile header */}
       <div className="profile-header-card">
         <div className="profile-cover">
           <span>✦ INK & IDEAS ✦</span>
@@ -277,11 +336,12 @@ async function deleteStory(postId) {
         <div className="profile-main-info">
           <div className="profile-avatar-wrapper">
             <div className="profile-avatar">
-              {profile?.profilePicture ? (
+              {profilePictureUrl && !imageError ? (
                 <img
-                  src={`http://localhost:5001${profile.profilePicture}`}
+                  src={profilePictureUrl}
                   alt="Profile"
                   className="profile-avatar-image"
+                  onError={() => setImageError(true)}
                 />
               ) : (
                 (profile?.username || "U").charAt(0).toUpperCase()
@@ -348,6 +408,7 @@ async function deleteStory(postId) {
       {message && <p className="profile-success">{message}</p>}
       {error && <p className="profile-error">{error}</p>}
 
+      {/* Edit profile form */}
       {editing && (
         <form className="profile-edit-form" onSubmit={saveProfile}>
           <h2>Edit your profile</h2>
@@ -386,6 +447,7 @@ async function deleteStory(postId) {
         </form>
       )}
 
+      {/* Profile statistics */}
       <div className="profile-stats">
         <div className="profile-stat-card">
           <span>✍</span>
@@ -406,11 +468,13 @@ async function deleteStory(postId) {
         </div>
       </div>
 
+      {/* Published stories */}
       <div className="profile-stories-heading">
         <div>
           <span className="section-kicker">YOUR CREATIVE JOURNEY</span>
           <h2>My Published Stories</h2>
         </div>
+
         <span>{posts.length} stories</span>
       </div>
 
@@ -438,84 +502,82 @@ async function deleteStory(postId) {
                 </time>
               </div>
 
-              
-{editingPostId === post._id ? (
-  <form className="profile-edit-form" onSubmit={saveStory}>
-    <h3>Edit your story</h3>
+              {editingPostId === post._id ? (
+                <form className="profile-edit-form" onSubmit={saveStory}>
+                  <h3>Edit your story</h3>
 
-    <label>Story title</label>
-    <input
-      value={editTitle}
-      onChange={(e) => setEditTitle(e.target.value)}
-      maxLength={150}
-      required
-    />
+                  <label>Story title</label>
+                  <input
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    maxLength={150}
+                    required
+                  />
 
-    <label>Category</label>
-    <select
-      value={editCategory}
-      onChange={(e) => setEditCategory(e.target.value)}
-    >
-      <option value="Technology">Technology</option>
-      <option value="Education">Education</option>
-      <option value="Lifestyle">Lifestyle</option>
-      <option value="Travel">Travel</option>
-      <option value="General">General</option>
-    </select>
+                  <label>Category</label>
+                  <select
+                    value={editCategory}
+                    onChange={(e) => setEditCategory(e.target.value)}
+                  >
+                    <option value="Technology">Technology</option>
+                    <option value="Education">Education</option>
+                    <option value="Lifestyle">Lifestyle</option>
+                    <option value="Travel">Travel</option>
+                    <option value="General">General</option>
+                  </select>
 
-    <label>Story content</label>
-    <textarea
-      value={editContent}
-      onChange={(e) => setEditContent(e.target.value)}
-      rows={7}
-      maxLength={20000}
-      required
-    />
+                  <label>Story content</label>
+                  <textarea
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    rows={7}
+                    maxLength={20000}
+                    required
+                  />
 
-    <button
-      type="submit"
-      className="primary-button"
-      disabled={storySaving}
-    >
-      {storySaving ? "Saving..." : "Save Changes"}
-    </button>
+                  <button
+                    type="submit"
+                    className="primary-button"
+                    disabled={storySaving}
+                  >
+                    {storySaving ? "Saving..." : "Save Changes"}
+                  </button>
 
-    <button
-      type="button"
-      className="profile-cancel-button"
-      onClick={() => setEditingPostId(null)}
-    >
-      Cancel
-    </button>
-  </form>
-) : (
-  <>
-    <h3>{post.title}</h3>
+                  <button
+                    type="button"
+                    className="profile-cancel-button"
+                    onClick={() => setEditingPostId(null)}
+                  >
+                    Cancel
+                  </button>
+                </form>
+              ) : (
+                <>
+                  <h3>{post.title}</h3>
 
-    <p>
-      {post.content.length > 180
-        ? `${post.content.slice(0, 180)}...`
-        : post.content}
-    </p>
+                  <p>
+                    {post.content.length > 180
+                      ? `${post.content.slice(0, 180)}...`
+                      : post.content}
+                  </p>
 
-    <div className="profile-story-actions">
-      <button
-        type="button"
-        onClick={() => startEditingStory(post)}
-      >
-        ✎ Edit Story
-      </button>
+                  <div className="profile-story-actions">
+                    <button
+                      type="button"
+                      onClick={() => startEditingStory(post)}
+                    >
+                      ✎ Edit Story
+                    </button>
 
-      <button
-        type="button"
-        onClick={() => deleteStory(post._id)}
-      >
-        🗑 Delete Story
-      </button>
-    </div>
-  </>
-)}
-
+                    <button
+                      type="button"
+                      onClick={() => deleteStory(post._id)}
+                    >
+                      🗑 Delete Story
+                    </button>
+                  </div>
+                </>
+              )}
             </article>
           ))}
         </div>
